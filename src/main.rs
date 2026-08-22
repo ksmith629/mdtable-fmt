@@ -24,7 +24,7 @@ fn main() -> ExitCode {
         }
     };
 
-    match mdtable_fmt::normalize(&input) {
+    match mdtable_fmt::normalize_document(&input) {
         Some(output) => {
             print!("{output}");
             ExitCode::SUCCESS

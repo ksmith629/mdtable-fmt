@@ -46,9 +46,10 @@ Or pipe a table in on stdin:
 cat notes.md | mdtable-fmt
 ```
 
-The formatted table is written to stdout. If the input doesn't contain a
-header row followed by a valid `---` separator row, the tool exits with an
-error instead of guessing.
+The formatted table is written to stdout. A file can contain more than one
+table - each one is formatted in place, and everything in between (prose,
+headings, blank lines) is passed through untouched. If the input doesn't
+contain any table, the tool exits with an error instead of guessing.
 
 ## As a library
 
@@ -65,17 +66,20 @@ assert_eq!(formatted, "| a   | b   |\n| --- | --- |\n| 1   | 22  |\n");
 still get padded out - that's a GitHub markdown requirement, not a bug)
 
 `parse_table` and `format_table` are exposed separately if you need to
-inspect or modify a table's cells between the two steps.
+inspect or modify a table's cells between the two steps. `normalize` looks
+for a single table anywhere in its input; `normalize_document` formats
+every table in the input and passes everything else through unchanged,
+which is what the CLI uses.
 
 ## Current limitations
 
 This is an early skeleton. Known gaps:
 
-- One table per call - `normalize` stops at the first table it finds and
-  ignores anything after it.
 - No handling of multi-line cells or embedded block markup.
 - Column width is always "widest cell in the column" - no wrapping or
   truncation option yet.
+- No `--write` flag yet - the CLI only prints to stdout, it can't edit a
+  file in place.
 
 ## License
 

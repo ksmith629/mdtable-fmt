@@ -179,6 +179,73 @@ pub fn normalize(input: &str) -> Option<String> {
     parse_table(input).map(|t| format_table(&t))
 }
 
+/// Tries to read a table starting exactly at `lines[start]`. A table is a
+/// header row immediately followed by a valid separator row, followed by
+/// zero or more further non-blank rows. Returns the parsed table plus the
+/// number of lines it occupied, so the caller can skip past it.
+fn try_parse_table_at(lines: &[&str], start: usize) -> Option<(Table, usize)> {
+    if start + 1 >= lines.len() {
+        return None;
+    }
+    if lines[start].trim().is_empty() || lines[start + 1].trim().is_empty() {
+        return None;
+    }
+
+    let header = split_row(lines[start]);
+    let separator = split_row(lines[start + 1]);
+    if header.is_empty() || separator.len() != header.len() {
+        return None;
+    }
+    if !separator.iter().all(|c| is_separator_cell(c)) {
+        return None;
+    }
+
+    let alignments: Vec<Alignment> = separator.iter().map(|c| parse_alignment(c)).collect();
+    let col_count = header.len();
+
+    let mut rows = vec![header];
+    let mut end = start + 2;
+    while end < lines.len() && !lines[end].trim().is_empty() {
+        let mut cells = split_row(lines[end]);
+        cells.resize(col_count, String::new());
+        cells.truncate(col_count);
+        rows.push(cells);
+        end += 1;
+    }
+
+    Some((Table { rows, alignments }, end - start))
+}
+
+/// Formats every markdown table in `input` and leaves everything else -
+/// prose, blank lines, headings between tables - untouched. This is what
+/// lets a single file with several tables get formatted in one pass,
+/// unlike `normalize`, which only looks for one table in the whole input.
+/// Returns `None` if `input` doesn't contain any table, mirroring
+/// `normalize`; a `None`/`Some` split is used instead of comparing output
+/// to input because a file whose table is already correctly formatted
+/// would otherwise look indistinguishable from "no table found".
+pub fn normalize_document(input: &str) -> Option<String> {
+    let lines: Vec<&str> = input.lines().collect();
+    let mut out = String::new();
+    let mut found_table = false;
+    let mut i = 0;
+    while i < lines.len() {
+        match try_parse_table_at(&lines, i) {
+            Some((table, consumed)) => {
+                found_table = true;
+                out.push_str(&format_table(&table));
+                i += consumed;
+            }
+            None => {
+                out.push_str(lines[i]);
+                out.push('\n');
+                i += 1;
+            }
+        }
+    }
+    found_table.then_some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,6 +335,69 @@ mod tests {
     #[test]
     fn normalize_returns_none_for_non_table_input() {
         assert_eq!(normalize("just some text\nmore text\n"), None);
+    }
+
+    #[test]
+    fn normalize_document_formats_every_table_and_keeps_prose() {
+        let input = "\
+# Team
+
+|Name|Age|
+|-|-----|
+|Al|30|
+
+Some notes in between.
+
+|x|y|
+|--:|:--|
+|1|two|
+";
+        let expected = "\
+# Team
+
+| Name | Age |
+| ---- | --- |
+| Al   | 30  |
+
+Some notes in between.
+
+|   x | y   |
+| --: | :-- |
+|   1 | two |
+";
+        assert_eq!(normalize_document(input).unwrap(), expected);
+    }
+
+    #[test]
+    fn normalize_document_returns_none_for_non_table_input() {
+        let input = "just some text\nmore text\n";
+        assert_eq!(normalize_document(input), None);
+    }
+
+    #[test]
+    fn normalize_document_treats_back_to_back_tables_with_no_blank_line_as_one() {
+        // Once a header + separator is found, every following non-blank
+        // line is a data row - there's no re-detection of a new header
+        // partway through. GitHub's own table parsing works the same way,
+        // so two tables jammed together without a blank line between them
+        // read as one table with an odd-looking row in the middle.
+        let input = "\
+|a|b|
+|-|-|
+|1|2|
+|c|d|
+|-|-|
+|3|4|
+";
+        let expected = "\
+| a   | b   |
+| --- | --- |
+| 1   | 2   |
+| c   | d   |
+| -   | -   |
+| 3   | 4   |
+";
+        assert_eq!(normalize_document(input).unwrap(), expected);
     }
 
     #[test]
