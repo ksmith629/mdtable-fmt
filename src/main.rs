@@ -4,10 +4,29 @@ use std::io::{self, Read};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let path = env::args().nth(1);
+    let mut write = false;
+    let mut path = None;
+    for arg in env::args().skip(1) {
+        if arg == "--write" {
+            write = true;
+        } else if path.is_none() {
+            path = Some(arg);
+        } else {
+            eprintln!("mdtable-fmt: unexpected extra argument {arg}");
+            return ExitCode::FAILURE;
+        }
+    }
 
-    let input = match path {
-        Some(path) => match fs::read_to_string(&path) {
+    let path = match (write, path) {
+        (true, None) => {
+            eprintln!("mdtable-fmt: --write needs a file path, stdin can't be edited in place");
+            return ExitCode::FAILURE;
+        }
+        (_, path) => path,
+    };
+
+    let input = match &path {
+        Some(path) => match fs::read_to_string(path) {
             Ok(contents) => contents,
             Err(err) => {
                 eprintln!("mdtable-fmt: couldn't read {path}: {err}");
@@ -26,7 +45,15 @@ fn main() -> ExitCode {
 
     match mdtable_fmt::normalize_document(&input) {
         Some(output) => {
-            print!("{output}");
+            if write {
+                let path = path.expect("--write without a path was rejected above");
+                if let Err(err) = fs::write(&path, &output) {
+                    eprintln!("mdtable-fmt: couldn't write {path}: {err}");
+                    return ExitCode::FAILURE;
+                }
+            } else {
+                print!("{output}");
+            }
             ExitCode::SUCCESS
         }
         None => {

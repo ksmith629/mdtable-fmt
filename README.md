@@ -46,6 +46,15 @@ Or pipe a table in on stdin:
 cat notes.md | mdtable-fmt
 ```
 
+Edit a file in place instead of printing to stdout:
+
+```
+mdtable-fmt --write notes.md
+```
+
+`--write` requires a file path - there's no file to edit in place when the
+input comes from stdin.
+
 The formatted table is written to stdout. A file can contain more than one
 table - each one is formatted in place, and everything in between (prose,
 headings, blank lines) is passed through untouched. If the input doesn't
@@ -78,8 +87,8 @@ This is an early skeleton. Known gaps:
 - No handling of multi-line cells or embedded block markup.
 - Column width is always "widest cell in the column" - no wrapping or
   truncation option yet.
-- No `--write` flag yet - the CLI only prints to stdout, it can't edit a
-  file in place.
+- Line endings aren't handled explicitly - a CRLF file gets read, split,
+  and rejoined with `\n`, so `--write` on a CRLF file will flip it to LF.
 
 ## License
 
