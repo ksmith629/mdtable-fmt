@@ -87,8 +87,6 @@ This is an early skeleton. Known gaps:
 - No handling of multi-line cells or embedded block markup.
 - Column width is always "widest cell in the column" - no wrapping or
   truncation option yet.
-- Line endings aren't handled explicitly - a CRLF file gets read, split,
-  and rejoined with `\n`, so `--write` on a CRLF file will flip it to LF.
 
 ## License
 

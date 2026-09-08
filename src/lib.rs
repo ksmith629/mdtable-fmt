@@ -173,10 +173,27 @@ pub fn format_table(table: &Table) -> String {
     out
 }
 
+/// `str::lines()` treats a lone `\r\n` the same as `\n`, which is what makes
+/// `split_row` and `parse_table` line-ending-agnostic. But `format_table`
+/// always joins rows with `\n`, so a CRLF input would silently come back as
+/// LF. We detect the input's convention here and match it on the way out
+/// instead.
+fn uses_crlf(input: &str) -> bool {
+    input.contains("\r\n")
+}
+
+fn match_line_ending(output: String, input: &str) -> String {
+    if uses_crlf(input) {
+        output.replace('\n', "\r\n")
+    } else {
+        output
+    }
+}
+
 /// Parses then re-renders `input`, which is the whole point of this crate.
 /// Returns `None` if `input` doesn't contain a parseable table.
 pub fn normalize(input: &str) -> Option<String> {
-    parse_table(input).map(|t| format_table(&t))
+    parse_table(input).map(|t| match_line_ending(format_table(&t), input))
 }
 
 /// Tries to read a table starting exactly at `lines[start]`. A table is a
@@ -243,7 +260,7 @@ pub fn normalize_document(input: &str) -> Option<String> {
             }
         }
     }
-    found_table.then_some(out)
+    found_table.then_some(match_line_ending(out, input))
 }
 
 #[cfg(test)]
@@ -397,6 +414,20 @@ Some notes in between.
 | -   | -   |
 | 3   | 4   |
 ";
+        assert_eq!(normalize_document(input).unwrap(), expected);
+    }
+
+    #[test]
+    fn normalize_preserves_crlf_line_endings() {
+        let input = "|a|bb|\r\n|-|-|\r\n|1|2|\r\n";
+        let expected = "| a   | bb  |\r\n| --- | --- |\r\n| 1   | 2   |\r\n";
+        assert_eq!(normalize(input).unwrap(), expected);
+    }
+
+    #[test]
+    fn normalize_document_preserves_crlf_line_endings() {
+        let input = "Notes\r\n\r\n|a|bb|\r\n|-|-|\r\n|1|2|\r\n";
+        let expected = "Notes\r\n\r\n| a   | bb  |\r\n| --- | --- |\r\n| 1   | 2   |\r\n";
         assert_eq!(normalize_document(input).unwrap(), expected);
     }
 
