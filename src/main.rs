@@ -5,10 +5,27 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let mut write = false;
+    let mut max_width = None;
     let mut path = None;
-    for arg in env::args().skip(1) {
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
         if arg == "--write" {
             write = true;
+        } else if arg == "--width" {
+            let value = match args.next() {
+                Some(value) => value,
+                None => {
+                    eprintln!("mdtable-fmt: --width needs a number");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match value.parse::<usize>() {
+                Ok(width) if width > 0 => max_width = Some(width),
+                _ => {
+                    eprintln!("mdtable-fmt: --width expects a positive number, got {value}");
+                    return ExitCode::FAILURE;
+                }
+            }
         } else if path.is_none() {
             path = Some(arg);
         } else {
@@ -43,7 +60,7 @@ fn main() -> ExitCode {
         }
     };
 
-    match mdtable_fmt::normalize_document(&input) {
+    match mdtable_fmt::normalize_document_with_width(&input, max_width) {
         Some(output) => {
             if write {
                 let path = path.expect("--write without a path was rejected above");

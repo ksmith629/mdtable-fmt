@@ -55,6 +55,18 @@ mdtable-fmt --write notes.md
 `--write` requires a file path - there's no file to edit in place when the
 input comes from stdin.
 
+Cap how wide a column is allowed to get, wrapping anything longer onto extra
+lines within the same cell:
+
+```
+mdtable-fmt --width 20 notes.md
+```
+
+Wrapping breaks on whitespace; a single word longer than the limit is
+hard-split since there's nowhere else to break it. The limit is a soft floor
+of three characters (GitHub's minimum separator width), so `--width 1` and
+`--width 3` behave the same.
+
 The formatted table is written to stdout. A file can contain more than one
 table - each one is formatted in place, and everything in between (prose,
 headings, blank lines) is passed through untouched. If the input doesn't
@@ -78,15 +90,16 @@ still get padded out - that's a GitHub markdown requirement, not a bug)
 inspect or modify a table's cells between the two steps. `normalize` looks
 for a single table anywhere in its input; `normalize_document` formats
 every table in the input and passes everything else through unchanged,
-which is what the CLI uses.
+which is what the CLI uses. Each has a `_with_width` counterpart
+(`format_table_with_width`, `normalize_with_width`,
+`normalize_document_with_width`) that takes an `Option<usize>` column width
+limit instead of always sizing columns to their widest cell.
 
 ## Current limitations
 
 This is an early skeleton. Known gaps:
 
 - No handling of multi-line cells or embedded block markup.
-- Column width is always "widest cell in the column" - no wrapping or
-  truncation option yet.
 
 ## License
 

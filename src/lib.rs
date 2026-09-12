@@ -106,17 +106,58 @@ pub fn parse_table(input: &str) -> Option<Table> {
 /// rendered column is at least this wide regardless of content.
 const MIN_COLUMN_WIDTH: usize = 3;
 
-fn column_widths(table: &Table) -> Vec<usize> {
-    let mut widths = vec![MIN_COLUMN_WIDTH; table.alignments.len()];
-    for row in &table.rows {
-        for (i, cell) in row.iter().enumerate() {
-            let len = cell.chars().count();
-            if len > widths[i] {
-                widths[i] = len;
+/// Word-wraps `text` so each returned line is at most `width` chars. A word
+/// longer than `width` is hard-split since there's nowhere else to break it
+/// (same as how a terminal wraps a long URL).
+fn wrap_cell(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_len = 0usize;
+
+    for word in text.split_whitespace() {
+        let mut remaining = word;
+        loop {
+            let remaining_len = remaining.chars().count();
+            if remaining_len == 0 {
+                break;
+            }
+            let sep = usize::from(current_len > 0);
+            if current_len + sep + remaining_len <= width {
+                if sep == 1 {
+                    current.push(' ');
+                    current_len += 1;
+                }
+                current.push_str(remaining);
+                current_len += remaining_len;
+                break;
+            }
+            if current_len == 0 {
+                let take = width.min(remaining_len);
+                let split_at = remaining
+                    .char_indices()
+                    .nth(take)
+                    .map(|(idx, _)| idx)
+                    .unwrap_or(remaining.len());
+                let (chunk, rest) = remaining.split_at(split_at);
+                current.push_str(chunk);
+                current_len = take;
+                remaining = rest;
+                if !remaining.is_empty() {
+                    lines.push(std::mem::take(&mut current));
+                    current_len = 0;
+                }
+            } else {
+                lines.push(std::mem::take(&mut current));
+                current_len = 0;
             }
         }
     }
-    widths
+
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+    lines
 }
 
 fn pad_cell(text: &str, width: usize, alignment: Alignment) -> String {
@@ -144,19 +185,59 @@ fn separator_cell(width: usize, alignment: Alignment) -> String {
 /// Renders a table with every column padded to its widest cell and pipes
 /// lined up down the page. This is the inverse of `parse_table`.
 pub fn format_table(table: &Table) -> String {
-    let widths = column_widths(table);
-    let mut out = String::new();
+    format_table_with_width(table, None)
+}
 
-    for (row_index, row) in table.rows.iter().enumerate() {
-        let cells: Vec<String> = row
-            .iter()
-            .zip(&widths)
-            .enumerate()
-            .map(|(i, (cell, &w))| pad_cell(cell, w, table.alignments[i]))
-            .collect();
-        out.push_str("| ");
-        out.push_str(&cells.join(" | "));
-        out.push_str(" |\n");
+/// Same as `format_table`, but wraps any cell wider than `max_width` onto
+/// several lines instead of letting the column grow to fit it. Wrapping is
+/// by whitespace; a single word longer than `max_width` is hard-split since
+/// there's no other place to break it. `max_width` is clamped up to
+/// `MIN_COLUMN_WIDTH` so the rendered separator row is always valid.
+pub fn format_table_with_width(table: &Table, max_width: Option<usize>) -> String {
+    let wrap_width = max_width.map(|w| w.max(MIN_COLUMN_WIDTH));
+
+    let wrapped_rows: Vec<Vec<Vec<String>>> = table
+        .rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|cell| match wrap_width {
+                    Some(w) => wrap_cell(cell, w),
+                    None => vec![cell.clone()],
+                })
+                .collect()
+        })
+        .collect();
+
+    let mut widths = vec![MIN_COLUMN_WIDTH; table.alignments.len()];
+    for row in &wrapped_rows {
+        for (i, cell_lines) in row.iter().enumerate() {
+            for line in cell_lines {
+                let len = line.chars().count();
+                if len > widths[i] {
+                    widths[i] = len;
+                }
+            }
+        }
+    }
+
+    let mut out = String::new();
+    for (row_index, cell_lines) in wrapped_rows.iter().enumerate() {
+        let height = cell_lines.iter().map(Vec::len).max().unwrap_or(1);
+        for line_index in 0..height {
+            let cells: Vec<String> = cell_lines
+                .iter()
+                .zip(&widths)
+                .enumerate()
+                .map(|(i, (lines, &w))| {
+                    let text = lines.get(line_index).map(String::as_str).unwrap_or("");
+                    pad_cell(text, w, table.alignments[i])
+                })
+                .collect();
+            out.push_str("| ");
+            out.push_str(&cells.join(" | "));
+            out.push_str(" |\n");
+        }
 
         if row_index == 0 {
             let sep_cells: Vec<String> = widths
@@ -193,7 +274,13 @@ fn match_line_ending(output: String, input: &str) -> String {
 /// Parses then re-renders `input`, which is the whole point of this crate.
 /// Returns `None` if `input` doesn't contain a parseable table.
 pub fn normalize(input: &str) -> Option<String> {
-    parse_table(input).map(|t| match_line_ending(format_table(&t), input))
+    normalize_with_width(input, None)
+}
+
+/// Same as `normalize`, but wraps cells wider than `max_width` instead of
+/// letting columns grow to fit them.
+pub fn normalize_with_width(input: &str, max_width: Option<usize>) -> Option<String> {
+    parse_table(input).map(|t| match_line_ending(format_table_with_width(&t, max_width), input))
 }
 
 /// Tries to read a table starting exactly at `lines[start]`. A table is a
@@ -242,6 +329,12 @@ fn try_parse_table_at(lines: &[&str], start: usize) -> Option<(Table, usize)> {
 /// to input because a file whose table is already correctly formatted
 /// would otherwise look indistinguishable from "no table found".
 pub fn normalize_document(input: &str) -> Option<String> {
+    normalize_document_with_width(input, None)
+}
+
+/// Same as `normalize_document`, but wraps cells wider than `max_width`
+/// instead of letting columns grow to fit them.
+pub fn normalize_document_with_width(input: &str, max_width: Option<usize>) -> Option<String> {
     let lines: Vec<&str> = input.lines().collect();
     let mut out = String::new();
     let mut found_table = false;
@@ -250,7 +343,7 @@ pub fn normalize_document(input: &str) -> Option<String> {
         match try_parse_table_at(&lines, i) {
             Some((table, consumed)) => {
                 found_table = true;
-                out.push_str(&format_table(&table));
+                out.push_str(&format_table_with_width(&table, max_width));
                 i += consumed;
             }
             None => {
@@ -429,6 +522,66 @@ Some notes in between.
         let input = "Notes\r\n\r\n|a|bb|\r\n|-|-|\r\n|1|2|\r\n";
         let expected = "Notes\r\n\r\n| a   | bb  |\r\n| --- | --- |\r\n| 1   | 2   |\r\n";
         assert_eq!(normalize_document(input).unwrap(), expected);
+    }
+
+    #[test]
+    fn wrap_cell_leaves_short_text_alone() {
+        assert_eq!(wrap_cell("hi", 10), vec!["hi".to_string()]);
+    }
+
+    #[test]
+    fn wrap_cell_breaks_on_whitespace() {
+        assert_eq!(
+            wrap_cell("Rear Admiral", 8),
+            vec!["Rear".to_string(), "Admiral".to_string()]
+        );
+    }
+
+    #[test]
+    fn wrap_cell_hard_splits_a_word_longer_than_the_width() {
+        assert_eq!(
+            wrap_cell("supercalifragilistic", 6),
+            vec![
+                "superc".to_string(),
+                "alifra".to_string(),
+                "gilist".to_string(),
+                "ic".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn format_table_with_width_wraps_long_cells_onto_extra_lines() {
+        let input = "|Name|Role|\n|-|-|\n|Ada|Engineer|\n|Grace|Rear Admiral|\n";
+        let table = parse_table(input).unwrap();
+        let expected = "\
+| Name  | Role     |
+| ----- | -------- |
+| Ada   | Engineer |
+| Grace | Rear     |
+|       | Admiral  |
+";
+        assert_eq!(format_table_with_width(&table, Some(8)), expected);
+    }
+
+    #[test]
+    fn format_table_with_width_none_matches_format_table() {
+        let input = "|a|b|\n|-|-|\n|1|22|\n";
+        let table = parse_table(input).unwrap();
+        assert_eq!(format_table_with_width(&table, None), format_table(&table));
+    }
+
+    #[test]
+    fn normalize_with_width_wraps_a_single_table() {
+        let input = "|Name|Role|\n|-|-|\n|Ada|Engineer|\n|Grace|Rear Admiral|\n";
+        let expected = "\
+| Name  | Role     |
+| ----- | -------- |
+| Ada   | Engineer |
+| Grace | Rear     |
+|       | Admiral  |
+";
+        assert_eq!(normalize_with_width(input, Some(8)).unwrap(), expected);
     }
 
     #[test]
