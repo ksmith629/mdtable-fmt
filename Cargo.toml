@@ -4,5 +4,8 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Normalizes messy markdown tables: consistent padding, aligned pipes, honored column alignment"
+readme = "README.md"
+keywords = ["markdown", "table", "formatter", "cli"]
+categories = ["command-line-utilities", "text-processing"]
 
 [dependencies]
